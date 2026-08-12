@@ -2,29 +2,27 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = requi
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 
-// 1. Servidor web básico para que Render no suspenda el servicio
+// 1. Servidor web básico para mantener a Render activo
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('☕ Bot de Coffee Town está ONLINE 24/7'));
 app.listen(PORT, () => console.log(`Servidor HTTP activo en puerto ${PORT}`));
 
-// 2. Función para iniciar la conexión con WhatsApp
+// 2. Función principal del Bot de WhatsApp
 async function connectToWhatsApp() {
-  // Guarda las credenciales de la sesión en la carpeta "auth_info_baileys"
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
   const sock = makeWASocket({
     auth: state,
-    printQRInTerminal: false
+    printQRInTerminal: false // Manejaremos el QR manualmente para formatearlo bien
   });
 
   sock.ev.on('creds.update', saveCreds);
 
-  // Escuchar cambios de estado (QR y conexión)
+  // Evento de conexión / Código QR
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    // Si hay un QR disponible, se imprime en consola
     if (qr) {
       console.log('\n📱 ESCANEA ESTE CÓDIGO QR EN RENDER:\n');
       qrcode.generate(qr, { small: true });
@@ -32,7 +30,7 @@ async function connectToWhatsApp() {
 
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('Conexión cerrada. Intentando reconectar...', shouldReconnect);
+      console.log('Conexión cerrada. Reconectando...', shouldReconnect);
       if (shouldReconnect) {
         connectToWhatsApp();
       }
@@ -41,7 +39,7 @@ async function connectToWhatsApp() {
     }
   });
 
-  // Escuchar mensajes entrantes
+  // Evento de recepción de mensajes
   sock.ev.on('messages.upsert', async (m) => {
     const msg = m.messages[0];
     if (!msg.message || msg.key.fromMe) return;
@@ -49,12 +47,12 @@ async function connectToWhatsApp() {
     const from = msg.key.remoteJid;
     const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').toLowerCase();
 
-    // Helper para responder rápido
+    // Función auxiliar para enviar respuesta
     const sendReply = async (replyText) => {
       await sock.sendMessage(from, { text: replyText }, { quoted: msg });
     };
 
-    // A. Pedido desde la Web
+    // A. Pedido desde el Menú Web
     if (text.includes('hola, coffee town') || text.includes('quisiera realizar el siguiente pedido')) {
       await sendReply(
         `☕ *¡Hola! Gracias por escribir a Coffee Town.*\n\n` +
@@ -66,7 +64,7 @@ async function connectToWhatsApp() {
       return;
     }
 
-    // B. Comando Menú
+    // B. Menú
     if (text === 'menu' || text === 'menú' || text === '1') {
       await sendReply(
         `📖 Puedes ver nuestra carta actualizada y hacer tu pedido directo aquí:\n` +
