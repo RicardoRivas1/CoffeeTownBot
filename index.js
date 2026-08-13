@@ -3,9 +3,8 @@ const qrcode = require('qrcode-terminal');
 const express = require('express');
 
 // ⚠️ REEMPLAZA ESTA URL CON TU URL DE GOOGLE APPS SCRIPT:
-const GOOGLE_SHEETS_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbxdNJRRzGwbGM79-ulQylszNypeDdMoyI0-hcNkNxSgdhznFR8nrFczjuJLZFvHM9WI/exec';
+const GOOGLE_SHEETS_WEBHOOK_URL = 'https://script.google.com/macros/s/TU_SCRIPT_ID_AQUI/exec';
 
-// Servidor HTTP para mantener activo Render
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('☕ Bot de Coffee Town está ONLINE 24/7'));
@@ -45,30 +44,43 @@ async function connectToWhatsApp() {
     const rawText = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
     const text = rawText.toLowerCase();
 
-    // Obtener el Nombre del Perfil de WhatsApp
-    const nombreCliente = msg.pushName || 'Cliente WhatsApp';
+    const nombreCliente = msg.pushName || 'Cliente';
 
     const sendReply = async (replyText) => {
       await sock.sendMessage(from, { text: replyText }, { quoted: msg });
     };
 
-    // A. Detectar y Registrar Pedido
+    // A. Detección y Procesamiento Inteligente del Pedido
     if (text.includes('hola, coffee town') || text.includes('quisiera realizar el siguiente pedido')) {
       
-      // 1. Extraer el Total USD exacto
+      // 1. Extraer Total USD
       let totalEncontrado = 'Por calcular';
       const matchTotal = rawText.match(/\*Total USD:\*\s*\$?([\d\.,]+)/i) || rawText.match(/Total USD:\s*\$?([\d\.,]+)/i);
       if (matchTotal) {
         totalEncontrado = `$${matchTotal[1]}`;
       }
 
-      // 2. Formatear el número de teléfono
+      // 2. Extraer Método de Pago del mensaje
+      let metodoPago = 'Por definir';
+      const matchPago = rawText.match(/Método de Pago:\s*(.+)/i);
+      if (matchPago) {
+        metodoPago = matchPago[1].trim();
+      }
+
+      // 3. Extraer Ubicación / Tipo de entrega del mensaje
+      let tipoEntrega = 'Por definir';
+      const matchEntrega = rawText.match(/Ubicación \/ Retiro:\s*(.+)/i);
+      if (matchEntrega) {
+        tipoEntrega = matchEntrega[1].trim();
+      }
+
+      // 4. Formatear número de teléfono
       let numeroLimpio = from.replace('@s.whatsapp.net', '').replace('@c.us', '').split(':')[0];
       if (!numeroLimpio.startsWith('+')) {
         numeroLimpio = `+${numeroLimpio}`;
       }
 
-      // 3. Enviar a Google Sheets mediante Webhook
+      // 5. Registrar en Google Sheets
       try {
         await fetch(GOOGLE_SHEETS_WEBHOOK_URL, {
           method: 'POST',
@@ -78,23 +90,42 @@ async function connectToWhatsApp() {
             nombre: nombreCliente,
             telefono: numeroLimpio,
             pedido: rawText,
-            total: totalEncontrado
+            total: totalEncontrado,
+            entrega: tipoEntrega,
+            pago: metodoPago
           })
         });
-        console.log(`✅ Pedido de ${nombreCliente} guardado en Google Sheets`);
+        console.log(`✅ Pedido completo de ${nombreCliente} registrado en Google Sheets`);
       } catch (err) {
         console.error('❌ Error enviando a Google Sheets:', err);
       }
 
-      // 4. Respuesta automática al cliente
-      await sendReply(
-        `☕ *¡Pedido Recibido en Coffee Town, ${nombreCliente}!*\n\n` +
-        `Registramos los productos en nuestro sistema 📝.\n\n` +
-        `Para finalizar la preparación, respóndenos:\n` +
-        `1. ¿Es para *Retiro en tienda* o *Delivery*?\n` +
-        `2. Dirección o confirmación de retiro.\n\n` +
-        `Si deseas pagar de una vez, escribe la palabra *PAGO*.`
-      );
+      // 6. Construir respuesta DINÁMICA según lo que eligió el usuario
+      let respuestaBot = `☕ *¡Pedido Recibido, ${nombreCliente}!*\n\n` +
+                         `Registramos tu orden por un total de *${totalEncontrado}* 📝.\n\n`;
+
+      // Evaluación del método de pago
+      const pagoLower = metodoPago.toLowerCase();
+      if (pagoLower.includes('pago movil') || pagoLower.includes('pago móvil') || pagoLower.includes('zelle')) {
+        respuestaBot += `💳 *Datos de Pago (${metodoPago}):*\n` +
+                        `• *Pago Móvil:* Banesco (0134) | C.I. V-12345678 | Tlf: 0412-0000000\n` +
+                        `• *Zelle:* pagos@coffeetown.com\n\n` +
+                        `📌 *Por favor reenvíanos el comprobante por aquí para procesar tu café de una vez.*\n\n`;
+      } else if (pagoLower.includes('efectivo')) {
+        respuestaBot += `💵 Recibiremos tu pago en *Efectivo* al momento de la entrega.\n\n`;
+      }
+
+      // Evaluación de tipo de entrega
+      const entregaLower = tipoEntrega.toLowerCase();
+      if (entregaLower.includes('retiro')) {
+        respuestaBot += `📍 *Retiro en tienda:* Te avisaremos por aquí tan pronto tu pedido esté listo para recoger. ¡Nos encontramos en [Dirección del local]!`;
+      } else if (entregaLower.includes('delivery')) {
+        respuestaBot += `🛵 *Delivery:* Por favor envíanos tu *dirección exacta con punto de referencia* para coordinar el envío.`;
+      } else {
+        respuestaBot += `📍 Indícanos si pasarás retirando o necesitas *Delivery*.`;
+      }
+
+      await sendReply(respuestaBot);
       return;
     }
 
