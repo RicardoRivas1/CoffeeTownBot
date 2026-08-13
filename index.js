@@ -2,16 +2,15 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = requi
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 
-// ⚠️ REEMPLAZA ESTA URL CON LA TUYA DE GOOGLE APPS SCRIPT:
+// ⚠️ REEMPLAZA ESTA URL CON TU URL DE GOOGLE APPS SCRIPT:
 const GOOGLE_SHEETS_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbxdNJRRzGwbGM79-ulQylszNypeDdMoyI0-hcNkNxSgdhznFR8nrFczjuJLZFvHM9WI/exec';
 
-// 1. Servidor HTTP para mantener activo Render
+// Servidor HTTP para mantener activo Render
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('☕ Bot de Coffee Town está ONLINE 24/7'));
 app.listen(PORT, () => console.log(`Servidor HTTP activo en puerto ${PORT}`));
 
-// 2. Función principal para conectar WhatsApp
 async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
@@ -22,7 +21,6 @@ async function connectToWhatsApp() {
 
   sock.ev.on('creds.update', saveCreds);
 
-  // Control de estados de conexión y QR
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
 
@@ -33,16 +31,12 @@ async function connectToWhatsApp() {
 
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('Conexión cerrada. Reconectando...', shouldReconnect);
-      if (shouldReconnect) {
-        connectToWhatsApp();
-      }
+      if (shouldReconnect) connectToWhatsApp();
     } else if (connection === 'open') {
       console.log('\n🚀 ¡El Bot de Coffee Town está ONLINE en Render 24/7!\n');
     }
   });
 
-  // Procesamiento de mensajes recibidos
   sock.ev.on('messages.upsert', async (m) => {
     const msg = m.messages[0];
     if (!msg.message || msg.key.fromMe) return;
@@ -51,7 +45,9 @@ async function connectToWhatsApp() {
     const rawText = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
     const text = rawText.toLowerCase();
 
-    // Helper para responder citando el mensaje
+    // Obtener el Nombre del Perfil de WhatsApp
+    const nombreCliente = msg.pushName || 'Cliente WhatsApp';
+
     const sendReply = async (replyText) => {
       await sock.sendMessage(from, { text: replyText }, { quoted: msg });
     };
@@ -66,8 +62,8 @@ async function connectToWhatsApp() {
         totalEncontrado = `$${matchTotal[1]}`;
       }
 
-      // 2. Formatear número de teléfono
-      let numeroLimpio = from.replace('@s.whatsapp.net', '').replace('@c.us', '');
+      // 2. Formatear el número de teléfono
+      let numeroLimpio = from.replace('@s.whatsapp.net', '').replace('@c.us', '').split(':')[0];
       if (!numeroLimpio.startsWith('+')) {
         numeroLimpio = `+${numeroLimpio}`;
       }
@@ -79,23 +75,24 @@ async function connectToWhatsApp() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             fecha: new Date().toLocaleString('es-VE', { timeZone: 'America/Caracas' }),
+            nombre: nombreCliente,
             telefono: numeroLimpio,
             pedido: rawText,
             total: totalEncontrado
           })
         });
-        console.log('✅ Pedido guardado correctamente en Google Sheets');
+        console.log(`✅ Pedido de ${nombreCliente} guardado en Google Sheets`);
       } catch (err) {
         console.error('❌ Error enviando a Google Sheets:', err);
       }
 
       // 4. Respuesta automática al cliente
       await sendReply(
-        `☕ *¡Pedido Recibido en Coffee Town!*\n\n` +
+        `☕ *¡Pedido Recibido en Coffee Town, ${nombreCliente}!*\n\n` +
         `Registramos los productos en nuestro sistema 📝.\n\n` +
         `Para finalizar la preparación, respóndenos:\n` +
         `1. ¿Es para *Retiro en tienda* o *Delivery*?\n` +
-        `2. Tu *Nombre Completo*.\n\n` +
+        `2. Dirección o confirmación de retiro.\n\n` +
         `Si deseas pagar de una vez, escribe la palabra *PAGO*.`
       );
       return;
