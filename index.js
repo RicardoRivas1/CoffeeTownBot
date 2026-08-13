@@ -3,7 +3,7 @@ const qrcode = require('qrcode-terminal');
 const express = require('express');
 
 // ⚠️ REEMPLAZA ESTA URL CON TU URL DE GOOGLE APPS SCRIPT:
-const GOOGLE_SHEETS_WEBHOOK_URL = 'https://script.google.com/macros/s/TU_SCRIPT_ID_AQUI/exec';
+const GOOGLE_SHEETS_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbxdNJRRzGwbGM79-ulQylszNypeDdMoyI0-hcNkNxSgdhznFR8nrFczjuJLZFvHM9WI/exec';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
