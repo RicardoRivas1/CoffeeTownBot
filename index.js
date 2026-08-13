@@ -1,6 +1,7 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
+const pino = require('pino');
 
 // ⚠️ REEMPLAZA ESTA URL CON TU URL DE GOOGLE APPS SCRIPT:
 const GOOGLE_SHEETS_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbxdNJRRzGwbGM79-ulQylszNypeDdMoyI0-hcNkNxSgdhznFR8nrFczjuJLZFvHM9WI/exec';
@@ -15,7 +16,8 @@ async function connectToWhatsApp() {
 
   const sock = makeWASocket({
     auth: state,
-    printQRInTerminal: false
+    printQRInTerminal: false,
+    logger: pino({ level: 'silent' })
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -29,7 +31,10 @@ async function connectToWhatsApp() {
     }
 
     if (connection === 'close') {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      
+      console.log('Conexión cerrada. Razón:', statusCode, '| Intentando reconectar:', shouldReconnect);
       if (shouldReconnect) connectToWhatsApp();
     } else if (connection === 'open') {
       console.log('\n🚀 ¡El Bot de Coffee Town está ONLINE en Render 24/7!\n');
@@ -50,7 +55,7 @@ async function connectToWhatsApp() {
       await sock.sendMessage(from, { text: replyText }, { quoted: msg });
     };
 
-    // A. Detección y Procesamiento Inteligente del Pedido
+    // A. Detección y Procesamiento del Pedido
     if (text.includes('hola, coffee town') || text.includes('quisiera realizar el siguiente pedido')) {
       
       // 1. Extraer Total USD
@@ -60,27 +65,21 @@ async function connectToWhatsApp() {
         totalEncontrado = `$${matchTotal[1]}`;
       }
 
-      // 2. Extraer Método de Pago del mensaje
+      // 2. Extraer Método de Pago
       let metodoPago = 'Por definir';
       const matchPago = rawText.match(/Método de Pago:\s*(.+)/i);
       if (matchPago) {
         metodoPago = matchPago[1].trim();
       }
 
-      // 3. Extraer Ubicación / Tipo de entrega del mensaje
+      // 3. Extraer Ubicación / Entrega
       let tipoEntrega = 'Por definir';
       const matchEntrega = rawText.match(/Ubicación \/ Retiro:\s*(.+)/i);
       if (matchEntrega) {
         tipoEntrega = matchEntrega[1].trim();
       }
 
-      // 4. Formatear número de teléfono
-      let numeroLimpio = from.replace('@s.whatsapp.net', '').replace('@c.us', '').split(':')[0];
-      if (!numeroLimpio.startsWith('+')) {
-        numeroLimpio = `+${numeroLimpio}`;
-      }
-
-      // 5. Registrar en Google Sheets
+      // 4. Registrar en Google Sheets
       try {
         await fetch(GOOGLE_SHEETS_WEBHOOK_URL, {
           method: 'POST',
@@ -88,23 +87,21 @@ async function connectToWhatsApp() {
           body: JSON.stringify({
             fecha: new Date().toLocaleString('es-VE', { timeZone: 'America/Caracas' }),
             nombre: nombreCliente,
-            telefono: numeroLimpio,
             pedido: rawText,
             total: totalEncontrado,
             entrega: tipoEntrega,
             pago: metodoPago
           })
         });
-        console.log(`✅ Pedido completo de ${nombreCliente} registrado en Google Sheets`);
+        console.log(`✅ Pedido de ${nombreCliente} guardado en Google Sheets`);
       } catch (err) {
         console.error('❌ Error enviando a Google Sheets:', err);
       }
 
-      // 6. Construir respuesta DINÁMICA según lo que eligió el usuario
+      // 5. Respuesta Inteligente al cliente
       let respuestaBot = `☕ *¡Pedido Recibido, ${nombreCliente}!*\n\n` +
                          `Registramos tu orden por un total de *${totalEncontrado}* 📝.\n\n`;
 
-      // Evaluación del método de pago
       const pagoLower = metodoPago.toLowerCase();
       if (pagoLower.includes('pago movil') || pagoLower.includes('pago móvil') || pagoLower.includes('zelle')) {
         respuestaBot += `💳 *Datos de Pago (${metodoPago}):*\n` +
@@ -115,7 +112,6 @@ async function connectToWhatsApp() {
         respuestaBot += `💵 Recibiremos tu pago en *Efectivo* al momento de la entrega.\n\n`;
       }
 
-      // Evaluación de tipo de entrega
       const entregaLower = tipoEntrega.toLowerCase();
       if (entregaLower.includes('retiro')) {
         respuestaBot += `📍 *Retiro en tienda:* Te avisaremos por aquí tan pronto tu pedido esté listo para recoger. ¡Nos encontramos en [Dirección del local]!`;
