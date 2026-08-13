@@ -2,14 +2,16 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = requi
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 
-// URL de tu Apps Script de Google Sheets (Reemplaza con la tuya)
-const GOOGLE_SHEETS_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwDLMX15xfTfPOUl6G8K4UWX545azrRBpZvKpsS9q0vCEtUlvB1yLz3hh-DYaNjwQk/exec';
+// ⚠️ REEMPLAZA ESTA URL CON LA TUYA DE GOOGLE APPS SCRIPT:
+const GOOGLE_SHEETS_WEBHOOK_URL = 'https://script.google.com/macros/s/TU_SCRIPT_ID_AQUI/exec';
 
+// 1. Servidor HTTP para mantener activo Render
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('☕ Bot de Coffee Town está ONLINE 24/7'));
 app.listen(PORT, () => console.log(`Servidor HTTP activo en puerto ${PORT}`));
 
+// 2. Función principal para conectar WhatsApp
 async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
@@ -20,6 +22,7 @@ async function connectToWhatsApp() {
 
   sock.ev.on('creds.update', saveCreds);
 
+  // Control de estados de conexión y QR
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
 
@@ -30,12 +33,16 @@ async function connectToWhatsApp() {
 
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      if (shouldReconnect) connectToWhatsApp();
+      console.log('Conexión cerrada. Reconectando...', shouldReconnect);
+      if (shouldReconnect) {
+        connectToWhatsApp();
+      }
     } else if (connection === 'open') {
       console.log('\n🚀 ¡El Bot de Coffee Town está ONLINE en Render 24/7!\n');
     }
   });
 
+  // Procesamiento de mensajes recibidos
   sock.ev.on('messages.upsert', async (m) => {
     const msg = m.messages[0];
     if (!msg.message || msg.key.fromMe) return;
@@ -44,6 +51,7 @@ async function connectToWhatsApp() {
     const rawText = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
     const text = rawText.toLowerCase();
 
+    // Helper para responder citando el mensaje
     const sendReply = async (replyText) => {
       await sock.sendMessage(from, { text: replyText }, { quoted: msg });
     };
@@ -51,38 +59,44 @@ async function connectToWhatsApp() {
     // A. Detectar y Registrar Pedido
     if (text.includes('hola, coffee town') || text.includes('quisiera realizar el siguiente pedido')) {
       
-      // Intentar extraer el total si viene reflejado en el mensaje (ej: Total: $12.50 o BS)
-      let totalEncontrado = 'Por confirmar';
-      const matchTotal = rawText.match(/(?:Total|Monto|USD|\$)\s*:?\s*([\$\d\.,]+)/i);
+      // 1. Extraer el Total USD exacto
+      let totalEncontrado = 'Por calcular';
+      const matchTotal = rawText.match(/\*Total USD:\*\s*\$?([\d\.,]+)/i) || rawText.match(/Total USD:\s*\$?([\d\.,]+)/i);
       if (matchTotal) {
-        totalEncontrado = matchTotal[1];
+        totalEncontrado = `$${matchTotal[1]}`;
       }
 
-      // Enviar datos a Google Sheets mediante fetch
+      // 2. Formatear número de teléfono
+      let numeroLimpio = from.replace('@s.whatsapp.net', '').replace('@c.us', '');
+      if (!numeroLimpio.startsWith('+')) {
+        numeroLimpio = `+${numeroLimpio}`;
+      }
+
+      // 3. Enviar a Google Sheets mediante Webhook
       try {
         await fetch(GOOGLE_SHEETS_WEBHOOK_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             fecha: new Date().toLocaleString('es-VE', { timeZone: 'America/Caracas' }),
-            telefono: from.replace('@s.whatsapp.net', ''),
+            telefono: numeroLimpio,
             pedido: rawText,
             total: totalEncontrado
           })
         });
-        console.log('✅ Pedido guardado exitosamente en Google Sheets');
+        console.log('✅ Pedido guardado correctamente en Google Sheets');
       } catch (err) {
-        console.error('❌ Error guardando en Google Sheets:', err);
+        console.error('❌ Error enviando a Google Sheets:', err);
       }
 
-      // Respuesta al cliente
+      // 4. Respuesta automática al cliente
       await sendReply(
         `☕ *¡Pedido Recibido en Coffee Town!*\n\n` +
-        `Hemos registrado los detalles de tu orden en nuestro sistema.\n\n` +
-        `Por favor indícanos:\n` +
+        `Registramos los productos en nuestro sistema 📝.\n\n` +
+        `Para finalizar la preparación, respóndenos:\n` +
         `1. ¿Es para *Retiro en tienda* o *Delivery*?\n` +
-        `2. Tu *Nombre y Apellido*.\n\n` +
-        `Si deseas realizar el pago, responde con la palabra *PAGO*.`
+        `2. Tu *Nombre Completo*.\n\n` +
+        `Si deseas pagar de una vez, escribe la palabra *PAGO*.`
       );
       return;
     }
